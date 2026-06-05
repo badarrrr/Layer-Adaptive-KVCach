@@ -33,6 +33,27 @@ class LayerAdaptiveCompressor:
         self.min_tokens = min_tokens
         self.recent_window = recent_window
 
+    # @torch.no_grad()
+    # def compress_cache(
+    #     self,
+    #     cache: LegacyCache,
+    #     attentions: tuple[torch.Tensor, ...] | None,
+    #     policies: list[CompressionPolicy],
+    # ) -> LegacyCache:
+    #     compressed_layers = []
+    #     for layer_idx, (key, value) in enumerate(cache):
+    #         policy = policies[layer_idx]
+    #         keep_indices = self.select_keep_indices(
+    #             seq_len=key.shape[-2],
+    #             policy=policy,
+    #             attention=None if attentions is None else attentions[layer_idx],
+    #             device=key.device,
+    #             batch_size=key.shape[0],
+    #         )
+    #         compressed_layers.append(compress_layer_cache(key, value, keep_indices))
+            
+    #     return tuple(compressed_layers)
+    
     @torch.no_grad()
     def compress_cache(
         self,
@@ -43,6 +64,9 @@ class LayerAdaptiveCompressor:
         compressed_layers = []
         for layer_idx, (key, value) in enumerate(cache):
             policy = policies[layer_idx]
+            if policy.compression_ratio <= 0.0:
+                compressed_layers.append((key, value))
+                continue
             keep_indices = self.select_keep_indices(
                 seq_len=key.shape[-2],
                 policy=policy,
@@ -51,8 +75,17 @@ class LayerAdaptiveCompressor:
                 batch_size=key.shape[0],
             )
             compressed_layers.append(compress_layer_cache(key, value, keep_indices))
+    
+        # 强制所有层对齐到最小长度，避免 DynamicCache 处理不一致长度报错
+        min_len = min(k.shape[-2] for k, v in compressed_layers)
+        compressed_layers = [
+            (k[..., :min_len, :], v[..., :min_len, :])
+            for k, v in compressed_layers
+        ]
+    
         return tuple(compressed_layers)
 
+    
     def select_keep_indices(
         self,
         seq_len: int,

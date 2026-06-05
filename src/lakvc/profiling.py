@@ -30,9 +30,27 @@ def incremental_perplexity(
         if ids.shape[1] < 2:
             continue
 
+        # cache: LegacyCache | None = None
+        # for pos in range(ids.shape[1] - 1):
+        #     position_ids = torch.tensor([[pos]], device=device, dtype=torch.long)
+        #     outputs = model(
+        #         input_ids=ids[:, pos : pos + 1],
+        #         position_ids=position_ids,
+        #         past_key_values=cache,
+        #         use_cache=True,
+        #         output_attentions=compressor is not None,
+        #     )
+        #     logits = outputs.logits[:, -1, :]
+        #     target = ids[:, pos + 1]
+        #     losses.append(float(F.cross_entropy(logits, target, reduction="mean").item()))
+        #     cache = to_legacy_cache(outputs.past_key_values)
+        #     if compressor is not None and policies is not None:
+        #         cache = compressor.compress_cache(cache, outputs.attentions, policies)
+        
         cache: LegacyCache | None = None
         for pos in range(ids.shape[1] - 1):
-            position_ids = torch.tensor([[pos]], device=device, dtype=torch.long)
+            past_len = cache[0][0].shape[-2] if cache is not None else 0
+            position_ids = torch.tensor([[past_len]], device=device, dtype=torch.long)
             outputs = model(
                 input_ids=ids[:, pos : pos + 1],
                 position_ids=position_ids,

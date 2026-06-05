@@ -1,12 +1,12 @@
 {
   "llama2_7b": {
-    "model_id": "meta-llama/Llama-2-7b-hf",
+    "model_id": "./models/Llama-2-7b-hf",
     "requires_hf_auth": true,
     "torch_dtype": "float16",
     "device_map": "auto"
   },
   "mistral_7b": {
-    "model_id": "mistralai/Mistral-7B-v0.1",
+    "model_id": "./models/Mistral-7B-v0.1",
     "requires_hf_auth": false,
     "torch_dtype": "float16",
     "device_map": "auto"
