@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
@@ -10,6 +12,19 @@ from tqdm import tqdm
 from .cache_utils import LegacyCache, cache_memory_bytes, to_legacy_cache
 from .compression import CompressionPolicy, LayerAdaptiveCompressor
 from .scheduler import LayerProfile
+
+
+@dataclass(frozen=True)
+class PerplexityMetrics:
+    perplexity: float
+    token_count: int
+    elapsed_seconds: float
+    tokens_per_second: float
+    avg_cache_bytes_before: float
+    avg_cache_bytes_after: float
+    peak_cache_bytes_before: int
+    peak_cache_bytes_after: int
+    actual_cache_compression: float
 
 
 @torch.no_grad()
@@ -22,35 +37,45 @@ def incremental_perplexity(
     max_length: int = 512,
 ) -> float:
     """Teacher-forced autoregressive PPL with optional KV compression after each step."""
-    losses: list[float] = []
+    return evaluate_perplexity(
+        model=model,
+        tokenizer=tokenizer,
+        texts=texts,
+        compressor=compressor,
+        policies=policies,
+        max_length=max_length,
+    ).perplexity
+
+
+@torch.no_grad()
+def evaluate_perplexity(
+    model,
+    tokenizer,
+    texts: Iterable[str],
+    compressor: LayerAdaptiveCompressor | None = None,
+    policies: list[CompressionPolicy] | None = None,
+    max_length: int = 512,
+    description: str = "perplexity",
+) -> PerplexityMetrics:
+    """Evaluate teacher-forced PPL and KV-cache memory on a fixed text collection."""
+    total_loss = 0.0
+    token_count = 0
+    before_bytes = 0
+    after_bytes = 0
+    peak_before_bytes = 0
+    peak_after_bytes = 0
+    cache_bytes_per_token: float | None = None
     device = next(model.parameters()).device
-    for text in tqdm(list(texts), desc="perplexity"):
+    start = time.perf_counter()
+    for text in tqdm(list(texts), desc=description):
         ids = tokenizer(text, return_tensors="pt", truncation=True, max_length=max_length).input_ids
         ids = ids.to(device)
         if ids.shape[1] < 2:
             continue
 
-        # cache: LegacyCache | None = None
-        # for pos in range(ids.shape[1] - 1):
-        #     position_ids = torch.tensor([[pos]], device=device, dtype=torch.long)
-        #     outputs = model(
-        #         input_ids=ids[:, pos : pos + 1],
-        #         position_ids=position_ids,
-        #         past_key_values=cache,
-        #         use_cache=True,
-        #         output_attentions=compressor is not None,
-        #     )
-        #     logits = outputs.logits[:, -1, :]
-        #     target = ids[:, pos + 1]
-        #     losses.append(float(F.cross_entropy(logits, target, reduction="mean").item()))
-        #     cache = to_legacy_cache(outputs.past_key_values)
-        #     if compressor is not None and policies is not None:
-        #         cache = compressor.compress_cache(cache, outputs.attentions, policies)
-        
         cache: LegacyCache | None = None
         for pos in range(ids.shape[1] - 1):
-            past_len = cache[0][0].shape[-2] if cache is not None else 0
-            position_ids = torch.tensor([[past_len]], device=device, dtype=torch.long)
+            position_ids = torch.tensor([[pos]], device=device, dtype=torch.long)
             outputs = model(
                 input_ids=ids[:, pos : pos + 1],
                 position_ids=position_ids,
@@ -60,14 +85,41 @@ def incremental_perplexity(
             )
             logits = outputs.logits[:, -1, :]
             target = ids[:, pos + 1]
-            losses.append(float(F.cross_entropy(logits, target, reduction="mean").item()))
+            total_loss += float(F.cross_entropy(logits, target, reduction="sum").item())
+            token_count += int(target.numel())
             cache = to_legacy_cache(outputs.past_key_values)
+            current_cache_bytes = cache_memory_bytes(cache)
+            if cache_bytes_per_token is None:
+                cache_bytes_per_token = current_cache_bytes / max(pos + 1, 1)
+            reference_cache_bytes = int(cache_bytes_per_token * (pos + 1))
+            before_bytes += reference_cache_bytes
+            peak_before_bytes = max(peak_before_bytes, reference_cache_bytes)
             if compressor is not None and policies is not None:
-                cache = compressor.compress_cache(cache, outputs.attentions, policies)
+                cache = compressor.compress_cache(
+                    cache,
+                    outputs.attentions,
+                    policies,
+                    sequence_length=pos + 1,
+                )
+            compressed_cache_bytes = cache_memory_bytes(cache)
+            after_bytes += compressed_cache_bytes
+            peak_after_bytes = max(peak_after_bytes, compressed_cache_bytes)
 
-    if not losses:
+    elapsed_seconds = time.perf_counter() - start
+    if not token_count:
         raise ValueError("No valid samples were available for perplexity evaluation.")
-    return math.exp(sum(losses) / len(losses))
+    perplexity = math.exp(total_loss / token_count)
+    return PerplexityMetrics(
+        perplexity=perplexity,
+        token_count=token_count,
+        elapsed_seconds=elapsed_seconds,
+        tokens_per_second=token_count / max(elapsed_seconds, 1e-8),
+        avg_cache_bytes_before=before_bytes / token_count,
+        avg_cache_bytes_after=after_bytes / token_count,
+        peak_cache_bytes_before=peak_before_bytes,
+        peak_cache_bytes_after=peak_after_bytes,
+        actual_cache_compression=1.0 - (after_bytes / max(before_bytes, 1)),
+    )
 
 
 @torch.no_grad()
@@ -106,16 +158,41 @@ def build_profiles_from_sensitivity(
     redundancies: list[float],
     max_relative_ppl_increase: float = 0.05,
 ) -> list[LayerProfile]:
-    profiles: list[LayerProfile] = []
+    tested_ratios = sorted({ratio for curve in layer_ppls.values() for ratio in curve})
+    layer_stats: dict[int, tuple[float, float]] = {}
     for layer_idx, curve in sorted(layer_ppls.items()):
         safe = 0.0
+        rels = []
         for ratio, ppl in sorted(curve.items()):
             rel = (ppl - baseline_ppl) / max(baseline_ppl, 1e-8)
+            rels.append(rel)
             if rel <= max_relative_ppl_increase:
                 safe = max(safe, ratio)
-        steepness = max((ppl - baseline_ppl) / max(baseline_ppl, 1e-8) for ppl in curve.values())
-        importance = min(max(steepness, 0.0), 1.0)
+        layer_stats[layer_idx] = (safe, max(rels) if rels else 0.0)
+
+    max_steepness = max((steepness for _, steepness in layer_stats.values()), default=0.0)
+    use_redundancy_fallback = max_steepness <= 1e-8 and bool(redundancies) and bool(tested_ratios)
+    redundancy_floor = _percentile(redundancies, 0.10) if redundancies else 0.0
+    redundancy_ceiling = _percentile(redundancies, 0.90) if redundancies else 0.0
+    num_profiled_layers = max(layer_stats.keys(), default=-1) + 1
+
+    profiles: list[LayerProfile] = []
+    for layer_idx, curve in sorted(layer_ppls.items()):
+        safe, steepness = layer_stats[layer_idx]
         redundancy = redundancies[layer_idx] if layer_idx < len(redundancies) else 0.0
+        if use_redundancy_fallback:
+            clipped_redundancy = min(max(redundancy, redundancy_floor), redundancy_ceiling)
+            redundancy_rank = (clipped_redundancy - redundancy_floor) / max(
+                redundancy_ceiling - redundancy_floor,
+                1e-8,
+            )
+            depth_rank = layer_idx / max(num_profiled_layers - 1, 1)
+            compressibility = 0.75 * redundancy_rank + 0.25 * depth_rank
+            importance = 1.0 - compressibility
+            safe = tested_ratios[0] + compressibility * (tested_ratios[-1] - tested_ratios[0])
+        else:
+            importance = steepness / max(max_steepness, 1e-8) if max_steepness > 0 else 0.0
+            importance = min(max(importance, 0.0), 1.0)
         profiles.append(
             LayerProfile(
                 layer_idx=layer_idx,
@@ -125,6 +202,20 @@ def build_profiles_from_sensitivity(
             )
         )
     return profiles
+
+
+def _percentile(values: list[float], q: float) -> float:
+    if not values:
+        return 0.0
+    sorted_values = sorted(values)
+    q = min(max(q, 0.0), 1.0)
+    position = q * (len(sorted_values) - 1)
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return sorted_values[lower]
+    weight = position - lower
+    return sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight
 
 
 def kv_memory_mb(cache: LegacyCache) -> float:

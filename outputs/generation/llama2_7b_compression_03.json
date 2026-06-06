@@ -1,0 +1,233 @@
+{
+  "text": "Question: Write a detailed 500-word explanation of why KV cache memory grows during autoregressive decoding.\nAnswer: The KV cache is used to store the most recently generated codewords, and it can grow in size as more codewords are generated. This is because the KV cache stores the codewords in a compressed format, which takes up less space than storing them in their original form. As more codewords get generated, the KV Cache will need to expand in order to accommodate all of these new codewords.\nThe reason for this is that when you generate a codeword, the K V Cache has to compress the codeword before it can be stored in the cache. This compression process takes up less storage space than if the codeword was stored in its original form. So as more code words are generated, the cache needs to expand in size so that it can accommodate all those compressed codewords.",
+  "compression_ratio": 0.3,
+  "avg_cache_bytes_before": 59768832.0,
+  "avg_cache_bytes_after": 42081175.76047904,
+  "actual_cache_compression": 0.29593444689568227,
+  "policies": [
+    {
+      "compression_ratio": 0.0,
+      "strategy": "heavy_hitter",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "heavy_hitter",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "heavy_hitter",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "heavy_hitter",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.1,
+      "strategy": "heavy_hitter",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "heavy_hitter",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "heavy_hitter",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "heavy_hitter",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "heavy_hitter",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "heavy_hitter",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "heavy_hitter",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.0,
+      "strategy": "hybrid",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "hybrid",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "hybrid",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "hybrid",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "hybrid",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.0,
+      "strategy": "hybrid",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "hybrid",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.0,
+      "strategy": "hybrid",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "hybrid",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.25452773865062234,
+      "strategy": "hybrid",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.1,
+      "strategy": "snapkv",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "snapkv",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "snapkv",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "snapkv",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "snapkv",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "snapkv",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "snapkv",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "snapkv",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.3,
+      "strategy": "snapkv",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.1845590281428573,
+      "strategy": "snapkv",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    },
+    {
+      "compression_ratio": 0.0,
+      "strategy": "snapkv",
+      "recent_window": 32,
+      "heavy_ratio": 0.5,
+      "min_tokens": 32
+    }
+  ]
+}

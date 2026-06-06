@@ -1,0 +1,197 @@
+{
+  "model_name": "llama2_7b",
+  "layers": [
+    {
+      "layer_idx": 0,
+      "importance": 0.11700371066885328,
+      "redundancy": 0.515056935672358,
+      "safe_compression": 0.3
+    },
+    {
+      "layer_idx": 1,
+      "importance": 0.01680000470314475,
+      "redundancy": 0.699267562038788,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 2,
+      "importance": 0.0,
+      "redundancy": 0.4455180074429721,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 3,
+      "importance": 0.187756151303333,
+      "redundancy": 0.4343259087444078,
+      "safe_compression": 0.0
+    },
+    {
+      "layer_idx": 4,
+      "importance": 0.12625244503235228,
+      "redundancy": 0.4346553565912967,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 5,
+      "importance": 0.0,
+      "redundancy": 0.4587867463170528,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 6,
+      "importance": 0.0,
+      "redundancy": 0.4566457237857576,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 7,
+      "importance": 0.5746038086600067,
+      "redundancy": 0.4569159698098591,
+      "safe_compression": 0.3
+    },
+    {
+      "layer_idx": 8,
+      "importance": 0.23532336296342787,
+      "redundancy": 0.4575054387172487,
+      "safe_compression": 0.3
+    },
+    {
+      "layer_idx": 9,
+      "importance": 0.0,
+      "redundancy": 0.4588465931432855,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 10,
+      "importance": 0.9189366116352619,
+      "redundancy": 0.4597305338919481,
+      "safe_compression": 0.3
+    },
+    {
+      "layer_idx": 11,
+      "importance": 0.0,
+      "redundancy": 0.4612719966135979,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 12,
+      "importance": 0.0,
+      "redundancy": 0.45930777050710125,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 13,
+      "importance": 0.0,
+      "redundancy": 0.44569865600969505,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 14,
+      "importance": 0.0,
+      "redundancy": 0.46672733175973236,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 15,
+      "importance": 0.0,
+      "redundancy": 0.4614844821772315,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 16,
+      "importance": 0.32586985826754794,
+      "redundancy": 0.44472702647911266,
+      "safe_compression": 0.1
+    },
+    {
+      "layer_idx": 17,
+      "importance": 0.34656261017709433,
+      "redundancy": 0.4469795275688971,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 18,
+      "importance": 0.5604729331443847,
+      "redundancy": 0.4375179478743442,
+      "safe_compression": 0.0
+    },
+    {
+      "layer_idx": 19,
+      "importance": 0.3073165266756354,
+      "redundancy": 0.45961172235658454,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 20,
+      "importance": 0.5817450381683329,
+      "redundancy": 0.44779256728300204,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 21,
+      "importance": 1.0,
+      "redundancy": 0.44980987546385176,
+      "safe_compression": 0.3
+    },
+    {
+      "layer_idx": 22,
+      "importance": 0.0,
+      "redundancy": 0.4296876243764244,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 23,
+      "importance": 0.5996434602960851,
+      "redundancy": 0.43079735337732217,
+      "safe_compression": 0.1
+    },
+    {
+      "layer_idx": 24,
+      "importance": 0.0,
+      "redundancy": 0.4350386248513415,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 25,
+      "importance": 0.0,
+      "redundancy": 0.4434648538365823,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 26,
+      "importance": 0.003390365971824056,
+      "redundancy": 0.43095211348115264,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 27,
+      "importance": 0.0,
+      "redundancy": 0.4251947527274911,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 28,
+      "importance": 0.0,
+      "redundancy": 0.43079104540943114,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 29,
+      "importance": 0.0,
+      "redundancy": 0.43492713658867777,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 30,
+      "importance": 0.0,
+      "redundancy": 0.42686622773201116,
+      "safe_compression": 0.5
+    },
+    {
+      "layer_idx": 31,
+      "importance": 0.7948909528173882,
+      "redundancy": 0.38819295171495705,
+      "safe_compression": 0.3
+    }
+  ]
+}

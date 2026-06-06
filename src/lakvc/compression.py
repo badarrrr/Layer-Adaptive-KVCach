@@ -33,59 +33,46 @@ class LayerAdaptiveCompressor:
         self.min_tokens = min_tokens
         self.recent_window = recent_window
 
-    # @torch.no_grad()
-    # def compress_cache(
-    #     self,
-    #     cache: LegacyCache,
-    #     attentions: tuple[torch.Tensor, ...] | None,
-    #     policies: list[CompressionPolicy],
-    # ) -> LegacyCache:
-    #     compressed_layers = []
-    #     for layer_idx, (key, value) in enumerate(cache):
-    #         policy = policies[layer_idx]
-    #         keep_indices = self.select_keep_indices(
-    #             seq_len=key.shape[-2],
-    #             policy=policy,
-    #             attention=None if attentions is None else attentions[layer_idx],
-    #             device=key.device,
-    #             batch_size=key.shape[0],
-    #         )
-    #         compressed_layers.append(compress_layer_cache(key, value, keep_indices))
-            
-    #     return tuple(compressed_layers)
-    
     @torch.no_grad()
     def compress_cache(
         self,
         cache: LegacyCache,
         attentions: tuple[torch.Tensor, ...] | None,
         policies: list[CompressionPolicy],
+        sequence_length: int | None = None,
     ) -> LegacyCache:
+        if not cache:
+            return cache
+
+        # Transformers 4.41 LLaMA/Mistral create one causal mask for all layers.
+        # Keep the cache length uniform across layers, but let each layer choose
+        # its own retained token positions according to its policy.
+        target_lengths = [
+            min(policy.keep_count(sequence_length or key.shape[-2]), key.shape[-2])
+            for policy, (key, _) in zip(policies, cache)
+        ]
+        target_len = min(target_lengths)
+
         compressed_layers = []
         for layer_idx, (key, value) in enumerate(cache):
             policy = policies[layer_idx]
-            if policy.compression_ratio <= 0.0:
+            seq_len = key.shape[-2]
+            if target_len >= seq_len:
                 compressed_layers.append((key, value))
                 continue
+
             keep_indices = self.select_keep_indices(
-                seq_len=key.shape[-2],
+                seq_len=seq_len,
                 policy=policy,
                 attention=None if attentions is None else attentions[layer_idx],
                 device=key.device,
                 batch_size=key.shape[0],
+                keep_n=target_len,
             )
             compressed_layers.append(compress_layer_cache(key, value, keep_indices))
-    
-        # 强制所有层对齐到最小长度，避免 DynamicCache 处理不一致长度报错
-        min_len = min(k.shape[-2] for k, v in compressed_layers)
-        compressed_layers = [
-            (k[..., :min_len, :], v[..., :min_len, :])
-            for k, v in compressed_layers
-        ]
-    
+
         return tuple(compressed_layers)
 
-    
     def select_keep_indices(
         self,
         seq_len: int,
@@ -93,12 +80,15 @@ class LayerAdaptiveCompressor:
         attention: torch.Tensor | None,
         device,
         batch_size: int,
+        keep_n: int | None = None,
     ) -> torch.Tensor:
-        keep_n = min(policy.keep_count(seq_len), seq_len)
+        keep_n = min(policy.keep_count(seq_len) if keep_n is None else keep_n, seq_len)
         if keep_n >= seq_len:
             base = torch.arange(seq_len, device=device, dtype=torch.long)
             return base[None, :].expand(batch_size, -1)
 
+        if policy.compression_ratio <= 0.0:
+            return self._recent_indices(seq_len, keep_n, device, batch_size)
         if policy.strategy == "recent":
             return self._recent_indices(seq_len, keep_n, device, batch_size)
         if policy.strategy == "heavy_hitter":

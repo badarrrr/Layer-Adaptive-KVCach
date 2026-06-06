@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import torch
 
 from .cache_utils import cache_memory_bytes, to_legacy_cache
-from .compression import LayerAdaptiveCompressor
+from .compression import CompressionPolicy, LayerAdaptiveCompressor
 from .scheduler import RuntimeScheduler
 
 
@@ -17,11 +19,17 @@ def generate_layer_adaptive(
     max_new_tokens: int = 128,
     temperature: float = 0.0,
     top_p: float = 1.0,
+    compression_start_tokens: int = 128,
+    max_layer_compression: float = 0.30,
+    repetition_penalty: float = 1.10,
+    no_repeat_ngram_size: int = 4,
+    format_instruction: bool = True,
 ) -> dict:
     device = next(model.parameters()).device
-    encoded = tokenizer(prompt, return_tensors="pt").to(device)
+    model_prompt = f"Question: {prompt}\nAnswer:" if format_instruction else prompt
+    encoded = tokenizer(model_prompt, return_tensors="pt").to(device)
     input_ids = encoded.input_ids
-    policies = scheduler.allocate(global_compression)
+    policies = _cap_policies(scheduler.allocate(global_compression), max_layer_compression)
     compressor = LayerAdaptiveCompressor(
         min_tokens=policies[0].min_tokens,
         recent_window=policies[0].recent_window,
@@ -32,23 +40,40 @@ def generate_layer_adaptive(
             "compression_ratio": global_compression,
             "avg_cache_bytes_before": 0,
             "avg_cache_bytes_after": 0,
+            "actual_cache_compression": 0.0,
             "policies": [policy.__dict__ for policy in policies],
         }
 
     outputs = model(input_ids=input_ids, use_cache=True, output_attentions=True)
     cache = to_legacy_cache(outputs.past_key_values)
-    before_bytes = cache_memory_bytes(cache)
-    cache = compressor.compress_cache(cache, outputs.attentions, policies)
+    initial_cache_bytes = cache_memory_bytes(cache)
+    bytes_per_token = initial_cache_bytes / max(input_ids.shape[1], 1)
+    before_bytes = initial_cache_bytes
+    if input_ids.shape[1] >= compression_start_tokens:
+        cache = compressor.compress_cache(
+            cache,
+            outputs.attentions,
+            policies,
+            sequence_length=input_ids.shape[1],
+        )
     after_bytes = cache_memory_bytes(cache)
 
-    generated = [input_ids]
-    next_token = _sample_next(outputs.logits[:, -1, :], temperature=temperature, top_p=top_p)
-    generated.append(next_token)
+    generated_ids = input_ids
+    next_token = _sample_next(
+        outputs.logits[:, -1, :],
+        generated_ids=generated_ids,
+        temperature=temperature,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
+        no_repeat_ngram_size=no_repeat_ngram_size,
+    )
+    generated_ids = torch.cat([generated_ids, next_token], dim=1)
 
     next_position = input_ids.shape[1]
     for _ in range(max_new_tokens - 1):
-        if next_token.item() == tokenizer.eos_token_id:
+        if tokenizer.eos_token_id is not None and next_token.item() == tokenizer.eos_token_id:
             break
+
         position_ids = torch.tensor([[next_position]], device=device, dtype=torch.long)
         outputs = model(
             input_ids=next_token,
@@ -58,26 +83,75 @@ def generate_layer_adaptive(
             output_attentions=True,
         )
         next_position += 1
-        cache = to_legacy_cache(outputs.past_key_values)
-        before_bytes += cache_memory_bytes(cache)
-        cache = compressor.compress_cache(cache, outputs.attentions, policies)
-        after_bytes += cache_memory_bytes(cache)
-        next_token = _sample_next(outputs.logits[:, -1, :], temperature=temperature, top_p=top_p)
-        generated.append(next_token)
 
-    full_ids = torch.cat(generated, dim=1)
+        cache = to_legacy_cache(outputs.past_key_values)
+        before_bytes += bytes_per_token * next_position
+        if next_position >= compression_start_tokens:
+            cache = compressor.compress_cache(
+                cache,
+                outputs.attentions,
+                policies,
+                sequence_length=next_position,
+            )
+        after_bytes += cache_memory_bytes(cache)
+
+        next_token = _sample_next(
+            outputs.logits[:, -1, :],
+            generated_ids=generated_ids,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+        )
+        generated_ids = torch.cat([generated_ids, next_token], dim=1)
+
+    generated_tokens = max(generated_ids.shape[1] - input_ids.shape[1], 1)
     return {
-        "text": tokenizer.decode(full_ids[0], skip_special_tokens=True),
+        "text": tokenizer.decode(generated_ids[0], skip_special_tokens=True),
         "compression_ratio": global_compression,
-        "avg_cache_bytes_before": before_bytes / max(len(generated), 1),
-        "avg_cache_bytes_after": after_bytes / max(len(generated), 1),
+        "avg_cache_bytes_before": before_bytes / generated_tokens,
+        "avg_cache_bytes_after": after_bytes / generated_tokens,
+        "actual_cache_compression": 1.0 - (after_bytes / max(before_bytes, 1)),
         "policies": [policy.__dict__ for policy in policies],
     }
 
 
-def _sample_next(logits: torch.Tensor, temperature: float, top_p: float) -> torch.Tensor:
+def _cap_policies(
+    policies: list[CompressionPolicy],
+    max_layer_compression: float,
+) -> list[CompressionPolicy]:
+    cap = min(max(max_layer_compression, 0.0), 0.95)
+    return [
+        replace(policy, compression_ratio=min(policy.compression_ratio, cap))
+        for policy in policies
+    ]
+
+
+def _sample_next(
+    logits: torch.Tensor,
+    generated_ids: torch.Tensor,
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    no_repeat_ngram_size: int,
+) -> torch.Tensor:
+    logits = logits.clone()
+    if repetition_penalty > 1.0:
+        for batch_idx in range(logits.shape[0]):
+            seen_tokens = torch.unique(generated_ids[batch_idx])
+            token_logits = logits[batch_idx, seen_tokens]
+            logits[batch_idx, seen_tokens] = torch.where(
+                token_logits < 0,
+                token_logits * repetition_penalty,
+                token_logits / repetition_penalty,
+            )
+
+    if no_repeat_ngram_size > 1:
+        _ban_repeated_ngrams(logits, generated_ids, no_repeat_ngram_size)
+
     if temperature <= 0:
         return torch.argmax(logits, dim=-1, keepdim=True)
+
     probs = torch.softmax(logits / temperature, dim=-1)
     if top_p < 1.0:
         sorted_probs, sorted_idx = torch.sort(probs, descending=True, dim=-1)
@@ -88,3 +162,24 @@ def _sample_next(logits: torch.Tensor, temperature: float, top_p: float) -> torc
         filtered.scatter_(dim=-1, index=sorted_idx, src=sorted_probs * keep)
         probs = filtered / filtered.sum(dim=-1, keepdim=True)
     return torch.multinomial(probs, num_samples=1)
+
+
+def _ban_repeated_ngrams(
+    logits: torch.Tensor,
+    generated_ids: torch.Tensor,
+    ngram_size: int,
+) -> None:
+    if generated_ids.shape[1] < ngram_size - 1:
+        return
+
+    prefix_len = ngram_size - 1
+    for batch_idx in range(generated_ids.shape[0]):
+        tokens = generated_ids[batch_idx].tolist()
+        current_prefix = tuple(tokens[-prefix_len:])
+        banned_tokens = []
+        for start in range(len(tokens) - ngram_size + 1):
+            ngram = tokens[start : start + ngram_size]
+            if tuple(ngram[:-1]) == current_prefix:
+                banned_tokens.append(ngram[-1])
+        if banned_tokens:
+            logits[batch_idx, banned_tokens] = -torch.inf

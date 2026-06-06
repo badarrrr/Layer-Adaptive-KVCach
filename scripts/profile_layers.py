@@ -23,6 +23,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split", default="validation")
     parser.add_argument("--text-column", default="text")
     parser.add_argument("--local-text-file")
+    parser.add_argument(
+        "--data-file",
+        help="Local parquet file to load explicitly; registered under --split.",
+    )
     parser.add_argument("--samples", type=int, default=32)
     parser.add_argument("--max-length", type=int, default=512)
     parser.add_argument("--ratios", type=float, nargs="+", default=[0.1, 0.2, 0.3, 0.4, 0.5])
@@ -42,6 +46,7 @@ def main() -> None:
         text_column=args.text_column,
         limit=args.samples,
         local_text_file=args.local_text_file,
+        data_file=args.data_file,
     )
 
     baseline = incremental_perplexity(model, tokenizer, samples, max_length=args.max_length)
@@ -49,12 +54,30 @@ def main() -> None:
     compressor = LayerAdaptiveCompressor()
     num_layers = model.config.num_hidden_layers
     layer_ppls: dict[int, dict[float, float]] = {}
+    recent_baselines: dict[float, float] = {}
+
+    # Transformers 4.41 uses one causal mask across all decoder layers, so the
+    # compressed KV length has to be uniform. Measure the uniform recent-window
+    # pruning cost once per ratio, then attribute only the target layer's extra
+    # policy cost to the sensitivity curve.
+    for ratio in args.ratios:
+        policies = [
+            CompressionPolicy(ratio, "recent") for _ in range(num_layers)
+        ]
+        recent_baselines[ratio] = incremental_perplexity(
+            model,
+            tokenizer,
+            samples,
+            compressor=compressor,
+            policies=policies,
+            max_length=args.max_length,
+        )
 
     for layer_idx in range(num_layers):
         layer_ppls[layer_idx] = {}
         for ratio in args.ratios:
             policies = [
-                CompressionPolicy(0.0, "heavy_hitter") for _ in range(num_layers)
+                CompressionPolicy(ratio, "recent") for _ in range(num_layers)
             ]
             policies[layer_idx] = CompressionPolicy(ratio, "heavy_hitter")
             ppl = incremental_perplexity(
@@ -65,7 +88,8 @@ def main() -> None:
                 policies=policies,
                 max_length=args.max_length,
             )
-            layer_ppls[layer_idx][ratio] = ppl
+            extra_policy_cost = max(0.0, ppl - recent_baselines[ratio])
+            layer_ppls[layer_idx][ratio] = baseline + extra_policy_cost
 
     profiles = build_profiles_from_sensitivity(
         baseline_ppl=baseline,
