@@ -41,9 +41,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=6520)
     parser.add_argument("--min-sample-tokens", type=int, default=32)
     parser.add_argument("--max-length", type=int, default=256)
-    parser.add_argument("--ratios", type=float, nargs="+", default=[0.1, 0.2, 0.3])
+    parser.add_argument("--ratios", type=float, nargs="+", default=[0.02, 0.05, 0.1, 0.2])
     parser.add_argument("--recent-window", type=int, default=32)
     parser.add_argument("--min-tokens", type=int, default=32)
+    parser.add_argument("--sink-tokens", type=int, default=4)
     parser.add_argument("--max-layer-compression", type=float, default=0.5)
     parser.add_argument("--output-dir", default="outputs/wikitext_test")
     return parser.parse_args()
@@ -84,6 +85,7 @@ def main() -> None:
         num_layers=model.config.num_hidden_layers,
         recent_window=args.recent_window,
         min_tokens=args.min_tokens,
+        sink_tokens=args.sink_tokens,
     )
     compressor = LayerAdaptiveCompressor(
         min_tokens=args.min_tokens,
@@ -103,7 +105,13 @@ def main() -> None:
     for ratio in args.ratios:
         methods = {
             "uniform_recent": [
-                CompressionPolicy(ratio, "recent", args.recent_window, min_tokens=args.min_tokens)
+                CompressionPolicy(
+                    ratio,
+                    "recent",
+                    args.recent_window,
+                    min_tokens=args.min_tokens,
+                    sink_tokens=args.sink_tokens,
+                )
                 for _ in range(model.config.num_hidden_layers)
             ],
             "uniform_heavy_hitter": [
@@ -112,6 +120,7 @@ def main() -> None:
                     "heavy_hitter",
                     args.recent_window,
                     min_tokens=args.min_tokens,
+                    sink_tokens=args.sink_tokens,
                 )
                 for _ in range(model.config.num_hidden_layers)
             ],
@@ -129,6 +138,7 @@ def main() -> None:
                 policies=policies,
                 max_length=args.max_length,
                 description=f"{method}@{ratio:.2f}",
+                target_compression_ratio=ratio,
             )
             row = _result_row(method, ratio, metrics, baseline.perplexity)
             row["mean_policy_compression"] = sum(
@@ -150,11 +160,13 @@ def main() -> None:
         "ratios": args.ratios,
         "recent_window": args.recent_window,
         "min_tokens": args.min_tokens,
+        "sink_tokens": args.sink_tokens,
         "note": (
             "Perplexity is measured on a fixed, seeded WikiText-2 test subset with "
             "context reset for each passage. The current Transformers-compatible "
-            "implementation keeps a uniform KV-cache length across layers while using "
-            "layer-specific token-selection policies."
+            "implementation keeps a uniform physical KV-cache length derived from the "
+            "requested global compression ratio while using layer-specific token-selection "
+            "policies. Throughput includes attention collection and Python compression overhead."
         ),
     }
     (output_dir / "results.json").write_text(
@@ -191,6 +203,7 @@ def _cap_policies(policies, max_layer_compression: float):
             recent_window=policy.recent_window,
             heavy_ratio=policy.heavy_ratio,
             min_tokens=policy.min_tokens,
+            sink_tokens=policy.sink_tokens,
         )
         for policy in policies
     ]

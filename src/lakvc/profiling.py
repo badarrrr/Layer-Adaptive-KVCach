@@ -35,6 +35,7 @@ def incremental_perplexity(
     compressor: LayerAdaptiveCompressor | None = None,
     policies: list[CompressionPolicy] | None = None,
     max_length: int = 512,
+    target_compression_ratio: float | None = None,
 ) -> float:
     """Teacher-forced autoregressive PPL with optional KV compression after each step."""
     return evaluate_perplexity(
@@ -44,6 +45,7 @@ def incremental_perplexity(
         compressor=compressor,
         policies=policies,
         max_length=max_length,
+        target_compression_ratio=target_compression_ratio,
     ).perplexity
 
 
@@ -56,6 +58,7 @@ def evaluate_perplexity(
     policies: list[CompressionPolicy] | None = None,
     max_length: int = 512,
     description: str = "perplexity",
+    target_compression_ratio: float | None = None,
 ) -> PerplexityMetrics:
     """Evaluate teacher-forced PPL and KV-cache memory on a fixed text collection."""
     total_loss = 0.0
@@ -79,6 +82,7 @@ def evaluate_perplexity(
             outputs = model(
                 input_ids=ids[:, pos : pos + 1],
                 position_ids=position_ids,
+                cache_position=torch.tensor([pos], device=device, dtype=torch.long),
                 past_key_values=cache,
                 use_cache=True,
                 output_attentions=compressor is not None,
@@ -100,6 +104,7 @@ def evaluate_perplexity(
                     outputs.attentions,
                     policies,
                     sequence_length=pos + 1,
+                    target_compression_ratio=target_compression_ratio,
                 )
             compressed_cache_bytes = cache_memory_bytes(cache)
             after_bytes += compressed_cache_bytes

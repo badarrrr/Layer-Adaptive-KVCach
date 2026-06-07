@@ -20,6 +20,13 @@ On the Linux server, set `PYTHONPATH` before running scripts. The model and
 dataset are expected to be available locally according to the existing project
 configuration.
 
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+export PYTHONPATH="$PWD/src"
+```
+
 The profiling script measures:
 
 - baseline incremental perplexity
@@ -33,6 +40,8 @@ Example:
 export PYTHONPATH=src
 python scripts/profile_layers.py \
   --model mistral_7b \
+  --data-file datasets/wikitext/wikitext-2-raw-v1/train-00000-of-00001.parquet \
+  --split train \
   --output outputs/profiles/mistral_7b_profile.json \
   --samples 32 \
   --max-length 512
@@ -67,6 +76,7 @@ python scripts/generate.py \
   --global-compression 0.2 \
   --max-new-tokens 128 \
   --recent-window 64 \
+  --sink-tokens 4 \
   --min-tokens 64 \
   --compression-start-tokens 64 \
   --max-layer-compression 0.35 \
@@ -93,13 +103,25 @@ python scripts/evaluate_wikitext.py \
   --split test \
   --samples 64 \
   --max-length 256 \
-  --ratios 0.1 0.2 0.3 \
+  --ratios 0.02 0.05 0.1 0.2 \
+  --sink-tokens 4 \
   --output-dir outputs/wikitext_test
 ```
 
 The output directory contains JSON and CSV measurements, a Markdown result
-table, the exact evaluated samples, and publication-ready PNG figures.
+table, the exact evaluated samples, and PNG figures. Treat results as
+preliminary until the small-ratio sanity checks and matched-compression
+comparisons pass.
 
 ## Method Summary
 
-The runtime scheduler allocates a user-provided global compression budget across layers. Shallow layers use conservative heavy-hitter pruning, middle layers use a hybrid recent-token and attention-based policy, and deep layers use a more aggressive SnapKV-style policy. The code does not modify model weights or architecture; it only changes the retained sequence positions in `past_key_values` during inference.
+Transformers 4.41 uses one causal mask across decoder layers on the supported
+legacy-cache path, so all layers currently retain the same physical number of
+tokens. That common length is derived directly from the requested global
+compression ratio, ensuring fair comparison with uniform baselines. The
+layer-adaptive scheduler changes which tokens each layer retains: shallow
+layers use conservative attention-sink/heavy-hitter selection, middle layers
+use a hybrid recent-token and attention-based policy, and deep layers use a
+more aggressive SnapKV-inspired policy. The code does not modify model weights.
+True heterogeneous per-layer cache lengths require model-level mask/cache
+changes and are not claimed by this prototype.

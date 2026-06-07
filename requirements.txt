@@ -6,4 +6,5 @@ nltk>=3.8.1
 numpy>=1.26.0
 rouge-score>=0.1.2
 tqdm>=4.66.0
+torch>=2.1.0
 transformers==4.41.0

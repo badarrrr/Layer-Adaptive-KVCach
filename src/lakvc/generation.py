@@ -44,7 +44,14 @@ def generate_layer_adaptive(
             "policies": [policy.__dict__ for policy in policies],
         }
 
-    outputs = model(input_ids=input_ids, use_cache=True, output_attentions=True)
+    prompt_positions = torch.arange(input_ids.shape[1], device=device, dtype=torch.long)
+    outputs = model(
+        input_ids=input_ids,
+        position_ids=prompt_positions.unsqueeze(0),
+        cache_position=prompt_positions,
+        use_cache=True,
+        output_attentions=True,
+    )
     cache = to_legacy_cache(outputs.past_key_values)
     initial_cache_bytes = cache_memory_bytes(cache)
     bytes_per_token = initial_cache_bytes / max(input_ids.shape[1], 1)
@@ -55,6 +62,7 @@ def generate_layer_adaptive(
             outputs.attentions,
             policies,
             sequence_length=input_ids.shape[1],
+            target_compression_ratio=global_compression,
         )
     after_bytes = cache_memory_bytes(cache)
 
@@ -78,6 +86,7 @@ def generate_layer_adaptive(
         outputs = model(
             input_ids=next_token,
             position_ids=position_ids,
+            cache_position=torch.tensor([next_position], device=device, dtype=torch.long),
             past_key_values=cache,
             use_cache=True,
             output_attentions=True,
@@ -92,6 +101,7 @@ def generate_layer_adaptive(
                 outputs.attentions,
                 policies,
                 sequence_length=next_position,
+                target_compression_ratio=global_compression,
             )
         after_bytes += cache_memory_bytes(cache)
 

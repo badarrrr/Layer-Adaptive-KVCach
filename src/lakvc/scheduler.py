@@ -24,10 +24,12 @@ class RuntimeScheduler:
         num_layers: int,
         recent_window: int = 32,
         min_tokens: int = 16,
+        sink_tokens: int = 4,
     ):
         self.num_layers = num_layers
         self.recent_window = recent_window
         self.min_tokens = min_tokens
+        self.sink_tokens = sink_tokens
         by_idx = {p.layer_idx: p for p in profiles}
         self.profiles = [
             by_idx.get(i, self._default_profile(i, num_layers)) for i in range(num_layers)
@@ -40,11 +42,18 @@ class RuntimeScheduler:
         num_layers: int,
         recent_window: int = 32,
         min_tokens: int = 16,
+        sink_tokens: int = 4,
     ) -> "RuntimeScheduler":
         with Path(path).open("r", encoding="utf-8") as f:
             raw = json.load(f)
         profiles = [LayerProfile(**item) for item in raw["layers"]]
-        return cls(profiles, num_layers, recent_window=recent_window, min_tokens=min_tokens)
+        return cls(
+            profiles,
+            num_layers,
+            recent_window=recent_window,
+            min_tokens=min_tokens,
+            sink_tokens=sink_tokens,
+        )
 
     def allocate(self, global_compression: float) -> list[CompressionPolicy]:
         budget = min(max(global_compression, 0.0), 0.95) * self.num_layers
@@ -78,7 +87,9 @@ class RuntimeScheduler:
                 compression_ratio=ratios[i],
                 strategy=self._strategy_for_layer(i),
                 recent_window=self.recent_window,
+                heavy_ratio=self._heavy_ratio_for_layer(i),
                 min_tokens=self.min_tokens,
+                sink_tokens=self.sink_tokens,
             )
             for i in range(self.num_layers)
         ]
@@ -115,3 +126,7 @@ class RuntimeScheduler:
         if depth < 0.66:
             return "hybrid"
         return "snapkv"
+
+    def _heavy_ratio_for_layer(self, layer_idx: int) -> float:
+        depth = layer_idx / max(self.num_layers - 1, 1)
+        return 0.35 + 0.40 * depth

@@ -29,7 +29,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--samples", type=int, default=32)
     parser.add_argument("--max-length", type=int, default=512)
-    parser.add_argument("--ratios", type=float, nargs="+", default=[0.1, 0.2, 0.3, 0.4, 0.5])
+    parser.add_argument("--ratios", type=float, nargs="+", default=[0.02, 0.05, 0.1, 0.2, 0.3])
+    parser.add_argument("--recent-window", type=int, default=32)
+    parser.add_argument("--min-tokens", type=int, default=16)
+    parser.add_argument("--sink-tokens", type=int, default=4)
     parser.add_argument("--max-relative-ppl-increase", type=float, default=0.05)
     parser.add_argument("--output", required=True)
     return parser.parse_args()
@@ -51,7 +54,10 @@ def main() -> None:
 
     baseline = incremental_perplexity(model, tokenizer, samples, max_length=args.max_length)
     redundancies = attention_overlap_redundancy(model, tokenizer, samples, max_length=args.max_length)
-    compressor = LayerAdaptiveCompressor()
+    compressor = LayerAdaptiveCompressor(
+        min_tokens=args.min_tokens,
+        recent_window=args.recent_window,
+    )
     num_layers = model.config.num_hidden_layers
     layer_ppls: dict[int, dict[float, float]] = {}
     recent_baselines: dict[float, float] = {}
@@ -62,7 +68,14 @@ def main() -> None:
     # policy cost to the sensitivity curve.
     for ratio in args.ratios:
         policies = [
-            CompressionPolicy(ratio, "recent") for _ in range(num_layers)
+            CompressionPolicy(
+                ratio,
+                "recent",
+                recent_window=args.recent_window,
+                min_tokens=args.min_tokens,
+                sink_tokens=args.sink_tokens,
+            )
+            for _ in range(num_layers)
         ]
         recent_baselines[ratio] = incremental_perplexity(
             model,
@@ -71,15 +84,29 @@ def main() -> None:
             compressor=compressor,
             policies=policies,
             max_length=args.max_length,
+            target_compression_ratio=ratio,
         )
 
     for layer_idx in range(num_layers):
         layer_ppls[layer_idx] = {}
         for ratio in args.ratios:
             policies = [
-                CompressionPolicy(ratio, "recent") for _ in range(num_layers)
+                CompressionPolicy(
+                    ratio,
+                    "recent",
+                    recent_window=args.recent_window,
+                    min_tokens=args.min_tokens,
+                    sink_tokens=args.sink_tokens,
+                )
+                for _ in range(num_layers)
             ]
-            policies[layer_idx] = CompressionPolicy(ratio, "heavy_hitter")
+            policies[layer_idx] = CompressionPolicy(
+                ratio,
+                "heavy_hitter",
+                recent_window=args.recent_window,
+                min_tokens=args.min_tokens,
+                sink_tokens=args.sink_tokens,
+            )
             ppl = incremental_perplexity(
                 model,
                 tokenizer,
@@ -87,6 +114,7 @@ def main() -> None:
                 compressor=compressor,
                 policies=policies,
                 max_length=args.max_length,
+                target_compression_ratio=ratio,
             )
             extra_policy_cost = max(0.0, ppl - recent_baselines[ratio])
             layer_ppls[layer_idx][ratio] = baseline + extra_policy_cost

@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--recent-window", type=int, default=128)
     parser.add_argument("--min-tokens", type=int, default=128)
+    parser.add_argument("--sink-tokens", type=int, default=4)
     parser.add_argument("--compression-start-tokens", type=int, default=128)
     parser.add_argument("--max-layer-compression", type=float, default=0.30)
     parser.add_argument("--repetition-penalty", type=float, default=1.10)
@@ -40,6 +41,7 @@ def main() -> None:
         num_layers=model.config.num_hidden_layers,
         recent_window=args.recent_window,
         min_tokens=args.min_tokens,
+        sink_tokens=args.sink_tokens,
     )
     result = generate_layer_adaptive(
         model=model,
