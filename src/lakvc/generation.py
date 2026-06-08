@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import replace
 
 import torch
@@ -29,6 +30,7 @@ def generate_layer_adaptive(
     model_prompt = f"Question: {prompt}\nAnswer:" if format_instruction else prompt
     encoded = tokenizer(model_prompt, return_tensors="pt").to(device)
     input_ids = encoded.input_ids
+    supports_cache_position = _supports_cache_position(model)
     policies = _cap_policies(scheduler.allocate(global_compression), max_layer_compression)
     compressor = LayerAdaptiveCompressor(
         min_tokens=policies[0].min_tokens,
@@ -45,13 +47,15 @@ def generate_layer_adaptive(
         }
 
     prompt_positions = torch.arange(input_ids.shape[1], device=device, dtype=torch.long)
-    outputs = model(
-        input_ids=input_ids,
-        position_ids=prompt_positions.unsqueeze(0),
-        cache_position=prompt_positions,
-        use_cache=True,
-        output_attentions=True,
-    )
+    model_kwargs = {
+        "input_ids": input_ids,
+        "position_ids": prompt_positions.unsqueeze(0),
+        "use_cache": True,
+        "output_attentions": True,
+    }
+    if supports_cache_position:
+        model_kwargs["cache_position"] = prompt_positions
+    outputs = model(**model_kwargs)
     cache = to_legacy_cache(outputs.past_key_values)
     initial_cache_bytes = cache_memory_bytes(cache)
     bytes_per_token = initial_cache_bytes / max(input_ids.shape[1], 1)
@@ -82,15 +86,18 @@ def generate_layer_adaptive(
         if tokenizer.eos_token_id is not None and next_token.item() == tokenizer.eos_token_id:
             break
 
-        position_ids = torch.tensor([[next_position]], device=device, dtype=torch.long)
-        outputs = model(
-            input_ids=next_token,
-            position_ids=position_ids,
-            cache_position=torch.tensor([next_position], device=device, dtype=torch.long),
-            past_key_values=cache,
-            use_cache=True,
-            output_attentions=True,
-        )
+        model_position = _model_position(next_position, cache, supports_cache_position)
+        position_ids = torch.tensor([[model_position]], device=device, dtype=torch.long)
+        model_kwargs = {
+            "input_ids": next_token,
+            "position_ids": position_ids,
+            "past_key_values": cache,
+            "use_cache": True,
+            "output_attentions": True,
+        }
+        if supports_cache_position:
+            model_kwargs["cache_position"] = torch.tensor([next_position], device=device, dtype=torch.long)
+        outputs = model(**model_kwargs)
         next_position += 1
 
         cache = to_legacy_cache(outputs.past_key_values)
@@ -193,3 +200,20 @@ def _ban_repeated_ngrams(
                 banned_tokens.append(ngram[-1])
         if banned_tokens:
             logits[batch_idx, banned_tokens] = -torch.inf
+
+
+def _supports_cache_position(model) -> bool:
+    try:
+        return "cache_position" in inspect.signature(model.forward).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _model_position(
+    absolute_position: int,
+    cache,
+    supports_cache_position: bool,
+) -> int:
+    if supports_cache_position or cache is None:
+        return absolute_position
+    return int(cache[0][0].shape[-2])

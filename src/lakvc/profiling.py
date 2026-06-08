@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import inspect
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -69,6 +70,7 @@ def evaluate_perplexity(
     peak_after_bytes = 0
     cache_bytes_per_token: float | None = None
     device = next(model.parameters()).device
+    supports_cache_position = _supports_cache_position(model)
     start = time.perf_counter()
     for text in tqdm(list(texts), desc=description):
         ids = tokenizer(text, return_tensors="pt", truncation=True, max_length=max_length).input_ids
@@ -78,15 +80,18 @@ def evaluate_perplexity(
 
         cache: LegacyCache | None = None
         for pos in range(ids.shape[1] - 1):
-            position_ids = torch.tensor([[pos]], device=device, dtype=torch.long)
-            outputs = model(
-                input_ids=ids[:, pos : pos + 1],
-                position_ids=position_ids,
-                cache_position=torch.tensor([pos], device=device, dtype=torch.long),
-                past_key_values=cache,
-                use_cache=True,
-                output_attentions=compressor is not None,
-            )
+            position = _model_position(pos, cache, supports_cache_position)
+            position_ids = torch.tensor([[position]], device=device, dtype=torch.long)
+            model_kwargs = {
+                "input_ids": ids[:, pos : pos + 1],
+                "position_ids": position_ids,
+                "past_key_values": cache,
+                "use_cache": True,
+                "output_attentions": compressor is not None,
+            }
+            if supports_cache_position:
+                model_kwargs["cache_position"] = torch.tensor([pos], device=device, dtype=torch.long)
+            outputs = model(**model_kwargs)
             logits = outputs.logits[:, -1, :]
             target = ids[:, pos + 1]
             total_loss += float(F.cross_entropy(logits, target, reduction="sum").item())
@@ -225,3 +230,20 @@ def _percentile(values: list[float], q: float) -> float:
 
 def kv_memory_mb(cache: LegacyCache) -> float:
     return cache_memory_bytes(cache) / (1024**2)
+
+
+def _supports_cache_position(model) -> bool:
+    try:
+        return "cache_position" in inspect.signature(model.forward).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _model_position(
+    absolute_position: int,
+    cache: LegacyCache | None,
+    supports_cache_position: bool,
+) -> int:
+    if supports_cache_position or cache is None:
+        return absolute_position
+    return int(cache[0][0].shape[-2])
